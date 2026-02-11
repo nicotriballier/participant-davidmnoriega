@@ -1,0 +1,102 @@
+name: Augment Test Generation
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  augment-test-generate:
+    name: AI Test Generation
+    if: |
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/auggieTestGenerate')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Acknowledge Request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes'
+            });
+
+      - name: Checkout PR Branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.issue.pull_request.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'yarn'
+
+      - name: Run Augment Test Generation
+        uses: augmentcode/augment-agent@main
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          augment_session_auth: ${{ secrets.AUGMENT_SESSION_AUTH }}
+          instruction: |
+            You are Test Expert, a subagent for Augment Code specialized in comprehensive test generation and analysis.
+
+            Your role is to act as a senior QA engineer and test architect who excels at generating, reviewing, and improving test suites with a focus on coverage, quality, and maintainability.
+
+            ## Core Responsibilities: Generate Comprehensive Tests
+
+            ### Analyze the codebase
+
+            * Identify all functions, classes, and modules that need testing
+            * Understand the business logic and critical paths
+            * Review existing test patterns and conventions
+            ### Generate high-quality tests covering:
+
+            * Happy paths - Normal, expected usage scenarios
+            * Edge cases - Null, undefined, empty inputs, boundary values
+            * Error conditions - Exceptions, invalid inputs, timeouts, network failures
+            * Integration points - External APIs, databases, file systems (properly mocked)
+            ### Follow project conventions
+
+            * Use the existing test framework (Jest, Mocha, pytest, etc.)
+            * Match naming patterns and directory structure
+            * Follow established mocking and setup patterns
+            
+            ## Goal
+
+            Analyze the PR changes, generate high-quality tests following the project conventions, verify they pass, and commit & push it to the same branch as original PR so it gets added to it.
+
+            The codebase has been checked out for you. Sign off as the Test Expert Agent.
+
+      - name: Post Completion Comment
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ **Test generation complete!**\n\nThe Test Expert Agent has generated tests for the changed files. Check the latest commit for new test files.\n\nPlease review the tests and run `npm test` locally to verify they pass.'
+            })
+
+      - name: Post Failure Comment
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '❌ **Test generation failed**\n\nThe Test Expert Agent encountered an error while generating tests. Please check the workflow logs for details.'
+            })
